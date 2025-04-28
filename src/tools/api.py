@@ -2,6 +2,7 @@ import datetime
 import os
 import pandas as pd
 import requests
+from typing import Optional
 
 from data.cache import get_cache
 from data.models import (
@@ -129,7 +130,7 @@ def search_line_items(
 def get_insider_trades(
     ticker: str,
     end_date: str,
-    start_date: str | None = None,
+    start_date: Optional[str] = None,
     limit: int = 1000,
 ) -> list[InsiderTrade]:
     """Fetch insider trades from cache or API."""
@@ -192,7 +193,7 @@ def get_insider_trades(
 def get_company_news(
     ticker: str,
     end_date: str,
-    start_date: str | None = None,
+    start_date: Optional[str] = None,
     limit: int = 1000,
 ) -> list[CompanyNews]:
     """Fetch company news from cache or API."""
@@ -255,7 +256,7 @@ def get_company_news(
 def get_market_cap(
     ticker: str,
     end_date: str,
-) -> float | None:
+) -> Optional[float]:
     """Fetch market cap from the API."""
     # Check if end_date is today
     if end_date == datetime.datetime.now().strftime("%Y-%m-%d"):

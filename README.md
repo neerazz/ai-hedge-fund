@@ -131,7 +131,7 @@ For any other ticker, you will need to set the `FINANCIAL_DATASETS_API_KEY` in t
 
 #### With Poetry
 ```bash
-poetry run python src/main.py --ticker AAPL,MSFT,NVDA
+poetry run python src/main.py --ticker TSLA,AAPL,MSFT,NVDA
 ```
 
 #### With Docker

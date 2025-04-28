@@ -14,6 +14,7 @@ import json
 from typing_extensions import Literal
 from utils.progress import progress
 from utils.llm import call_llm
+from typing import Optional
 
 
 class PeterLynchSignal(BaseModel):
@@ -291,7 +292,7 @@ def analyze_lynch_fundamentals(financial_line_items: list) -> dict:
     return {"score": final_score, "details": "; ".join(details)}
 
 
-def analyze_lynch_valuation(financial_line_items: list, market_cap: float | None) -> dict:
+def analyze_lynch_valuation(financial_line_items: list, market_cap: Optional[float]) -> dict:
     """
     Peter Lynch's approach to 'Growth at a Reasonable Price' (GARP):
       - Emphasize the PEG ratio: (P/E) / Growth Rate

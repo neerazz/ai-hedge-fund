@@ -14,6 +14,7 @@ from typing_extensions import Literal
 from utils.progress import progress
 from utils.llm import call_llm
 import statistics
+from typing import Optional
 
 
 class PhilFisherSignal(BaseModel):
@@ -398,7 +399,7 @@ def analyze_management_efficiency_leverage(financial_line_items: list) -> dict:
     return {"score": final_score, "details": "; ".join(details)}
 
 
-def analyze_fisher_valuation(financial_line_items: list, market_cap: float | None) -> dict:
+def analyze_fisher_valuation(financial_line_items: list, market_cap: Optional[float]) -> dict:
     """
     Phil Fisher is willing to pay for quality and growth, but still checks:
       - P/E

@@ -7,6 +7,7 @@ from typing_extensions import Literal
 from tools.api import get_financial_metrics, get_market_cap, search_line_items
 from utils.llm import call_llm
 from utils.progress import progress
+from typing import Dict, Any
 
 
 class WarrenBuffettSignal(BaseModel):
@@ -134,7 +135,7 @@ def warren_buffett_agent(state: AgentState):
     return {"messages": [message], "data": state["data"]}
 
 
-def analyze_fundamentals(metrics: list) -> dict[str, any]:
+def analyze_fundamentals(metrics: list) -> Dict[str, Any]:
     """Analyze company fundamentals based on Buffett's criteria."""
     if not metrics:
         return {"score": 0, "details": "Insufficient fundamental data"}
@@ -183,7 +184,7 @@ def analyze_fundamentals(metrics: list) -> dict[str, any]:
     return {"score": score, "details": "; ".join(reasoning), "metrics": latest_metrics.model_dump()}
 
 
-def analyze_consistency(financial_line_items: list) -> dict[str, any]:
+def analyze_consistency(financial_line_items: list) -> Dict[str, Any]:
     """Analyze earnings consistency and growth."""
     if len(financial_line_items) < 4:  # Need at least 4 periods for trend analysis
         return {"score": 0, "details": "Insufficient historical data"}
@@ -216,7 +217,7 @@ def analyze_consistency(financial_line_items: list) -> dict[str, any]:
     }
 
 
-def analyze_moat(metrics: list) -> dict[str, any]:
+def analyze_moat(metrics: list) -> Dict[str, Any]:
     """
     Evaluate whether the company likely has a durable competitive advantage (moat).
     For simplicity, we look at stability of ROE/operating margins over multiple periods
@@ -266,7 +267,7 @@ def analyze_moat(metrics: list) -> dict[str, any]:
     }
 
 
-def analyze_management_quality(financial_line_items: list) -> dict[str, any]:
+def analyze_management_quality(financial_line_items: list) -> Dict[str, Any]:
     """
     Checks for share dilution or consistent buybacks, and some dividend track record.
     A simplified approach:
@@ -306,7 +307,7 @@ def analyze_management_quality(financial_line_items: list) -> dict[str, any]:
     }
 
 
-def calculate_owner_earnings(financial_line_items: list) -> dict[str, any]:
+def calculate_owner_earnings(financial_line_items: list) -> Dict[str, Any]:
     """Calculate owner earnings (Buffett's preferred measure of true earnings power).
     Owner Earnings = Net Income + Depreciation - Maintenance CapEx"""
     if not financial_line_items or len(financial_line_items) < 1:
@@ -332,7 +333,7 @@ def calculate_owner_earnings(financial_line_items: list) -> dict[str, any]:
     }
 
 
-def calculate_intrinsic_value(financial_line_items: list) -> dict[str, any]:
+def calculate_intrinsic_value(financial_line_items: list) -> Dict[str, Any]:
     """Calculate intrinsic value using DCF with owner earnings."""
     if not financial_line_items:
         return {"intrinsic_value": None, "details": ["Insufficient data for valuation"]}
@@ -384,7 +385,7 @@ def calculate_intrinsic_value(financial_line_items: list) -> dict[str, any]:
 
 def generate_buffett_output(
     ticker: str,
-    analysis_data: dict[str, any],
+    analysis_data: Dict[str, Any],
     model_name: str,
     model_provider: str,
 ) -> WarrenBuffettSignal:
