@@ -197,6 +197,7 @@ def get_company_news(
     start_date: Optional[str] = None,
     limit: int = 1000,
     max_retries: int = 3,
+    wait_time: int = 30,
 ) -> list[CompanyNews]:
     """Fetch company news from cache or API."""
     # Check cache first
@@ -226,7 +227,6 @@ def get_company_news(
         
         response = requests.get(url, headers=headers)
         if response.status_code == 429:
-            wait_time = 20  # or parse from response.text if available
             print(f"Rate limited. Waiting {wait_time} seconds before retrying...")
             time.sleep(wait_time)
             retries += 1
