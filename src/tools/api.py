@@ -3,6 +3,7 @@ import os
 import pandas as pd
 import requests
 from typing import Optional
+import time
 
 from data.cache import get_cache
 from data.models import (
@@ -195,6 +196,7 @@ def get_company_news(
     end_date: str,
     start_date: Optional[str] = None,
     limit: int = 1000,
+    max_retries: int = 3,
 ) -> list[CompanyNews]:
     """Fetch company news from cache or API."""
     # Check cache first
@@ -215,6 +217,7 @@ def get_company_news(
     all_news = []
     current_end_date = end_date
     
+    retries = 0
     while True:
         url = f"https://api.financialdatasets.ai/news/?ticker={ticker}&end_date={current_end_date}"
         if start_date:
@@ -222,6 +225,14 @@ def get_company_news(
         url += f"&limit={limit}"
         
         response = requests.get(url, headers=headers)
+        if response.status_code == 429:
+            wait_time = 20  # or parse from response.text if available
+            print(f"Rate limited. Waiting {wait_time} seconds before retrying...")
+            time.sleep(wait_time)
+            retries += 1
+            if retries >= max_retries:
+                raise Exception(f"Too many retries for {ticker} news API.")
+            continue
         if response.status_code != 200:
             raise Exception(f"Error fetching data: {ticker} - {response.status_code} - {response.text}")
         
