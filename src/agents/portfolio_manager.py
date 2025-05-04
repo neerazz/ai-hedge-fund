@@ -36,6 +36,8 @@ def portfolio_management_agent(state: AgentState):
     current_prices = {}
     max_shares = {}
     signals_by_ticker = {}
+    has_valid_signals = False
+
     for ticker in tickers:
         progress.update_status("portfolio_management_agent", ticker, "Processing analyst signals")
 
@@ -52,23 +54,55 @@ def portfolio_management_agent(state: AgentState):
 
         # Get signals for the ticker
         ticker_signals = {}
+        valid_signals = 0
+        total_signals = 0
+
         for agent, signals in analyst_signals.items():
             if agent != "risk_management_agent" and ticker in signals:
-                ticker_signals[agent] = {"signal": signals[ticker]["signal"], "confidence": signals[ticker]["confidence"]}
+                signal = signals[ticker].get("signal")
+                confidence = signals[ticker].get("confidence", 0)
+                
+                # Only count signals with real confidence values
+                if signal and confidence > 0:
+                    valid_signals += 1
+                total_signals += 1
+                
+                ticker_signals[agent] = {
+                    "signal": signal,
+                    "confidence": confidence
+                }
+
+        # Track if we have enough valid signals
+        if valid_signals > 0:
+            has_valid_signals = True
+            
         signals_by_ticker[ticker] = ticker_signals
 
     progress.update_status("portfolio_management_agent", None, "Making trading decisions")
 
-    # Generate the trading decision
-    result = generate_trading_decision(
-        tickers=tickers,
-        signals_by_ticker=signals_by_ticker,
-        current_prices=current_prices,
-        max_shares=max_shares,
-        portfolio=portfolio,
-        model_name=state["metadata"]["model_name"],
-        model_provider=state["metadata"]["model_provider"],
-    )
+    # Generate trading decisions only if we have valid signals
+    if has_valid_signals:
+        result = generate_trading_decision(
+            tickers=tickers,
+            signals_by_ticker=signals_by_ticker,
+            current_prices=current_prices,
+            max_shares=max_shares,
+            portfolio=portfolio,
+            model_name=state["metadata"]["model_name"],
+            model_provider=state["metadata"]["model_provider"],
+        )
+    else:
+        # Create a default hold decision with explanation
+        result = PortfolioManagerOutput(
+            decisions={
+                ticker: PortfolioDecision(
+                    action="hold",
+                    quantity=0,
+                    confidence=0.0,
+                    reasoning="Insufficient valid signals from analysts to make trading decisions"
+                ) for ticker in tickers
+            }
+        )
 
     # Create the portfolio management message
     message = HumanMessage(
@@ -98,100 +132,165 @@ def generate_trading_decision(
     model_provider: str,
 ) -> PortfolioManagerOutput:
     """Attempts to get a decision from the LLM with retry logic"""
-    # Create the prompt template
-    template = ChatPromptTemplate.from_messages(
-        [
-            (
-              "system",
-              """You are a portfolio manager making final trading decisions based on multiple tickers.
+    
+    # Pre-process signals to aggregate confidence levels and determine overall sentiment
+    aggregated_signals = {}
+    for ticker in tickers:
+        ticker_signals = signals_by_ticker.get(ticker, {})
+        
+        if not ticker_signals:
+            continue
+            
+        bullish_confidence = 0.0
+        bearish_confidence = 0.0
+        total_valid_signals = 0
+        
+        for agent, signal_data in ticker_signals.items():
+            signal = signal_data.get("signal", "").lower()
+            confidence = signal_data.get("confidence", 0.0)
+            
+            if signal and confidence > 0:
+                if signal == "bullish":
+                    bullish_confidence += confidence
+                elif signal == "bearish":
+                    bearish_confidence += confidence
+                total_valid_signals += 1
+        
+        if total_valid_signals > 0:
+            avg_bullish = bullish_confidence / total_valid_signals
+            avg_bearish = bearish_confidence / total_valid_signals
+            
+            # Determine dominant sentiment and overall confidence
+            if avg_bullish > avg_bearish and avg_bullish > 30:  # Minimum confidence threshold
+                dominant_signal = "bullish"
+                overall_confidence = avg_bullish
+            elif avg_bearish > avg_bullish and avg_bearish > 30:
+                dominant_signal = "bearish"
+                overall_confidence = avg_bearish
+            else:
+                dominant_signal = "neutral"
+                overall_confidence = max(avg_bullish, avg_bearish)
+                
+            aggregated_signals[ticker] = {
+                "signal": dominant_signal,
+                "confidence": overall_confidence,
+                "valid_signals": total_valid_signals
+            }
 
-              Trading Rules:
-              - For long positions:
-                * Only buy if you have available cash
-                * Only sell if you currently hold long shares of that ticker
-                * Sell quantity must be ≤ current long position shares
-                * Buy quantity must be ≤ max_shares for that ticker
-              
-              - For short positions:
-                * Only short if you have available margin (position value × margin requirement)
-                * Only cover if you currently have short shares of that ticker
-                * Cover quantity must be ≤ current short position shares
-                * Short quantity must respect margin requirements
-              
-              - The max_shares values are pre-calculated to respect position limits
-              - Consider both long and short opportunities based on signals
-              - Maintain appropriate risk management with both long and short exposure
+    # Create an enhanced prompt template that includes aggregated signal information
+    template = ChatPromptTemplate.from_messages([
+        (
+            "system",
+            """You are a portfolio manager making final trading decisions based on multiple tickers.
 
-              Available Actions:
-              - "buy": Open or add to long position
-              - "sell": Close or reduce long position
-              - "short": Open or add to short position
-              - "cover": Close or reduce short position
-              - "hold": No action
+            Trading Rules:
+            - For long positions:
+              * Only buy if you have available cash
+              * Only sell if you currently hold long shares of that ticker
+              * Sell quantity must be ≤ current long position shares
+              * Buy quantity must be ≤ max_shares for that ticker
+            
+            - For short positions:
+              * Only short if you have available margin (position value × margin requirement)
+              * Only cover if you currently have short shares of that ticker
+              * Cover quantity must be ≤ current short position shares
+              * Short quantity must respect margin requirements
+            
+            - The max_shares values are pre-calculated to respect position limits
+            - Consider both long and short opportunities based on signals
+            - Maintain appropriate risk management with both long and short exposure
+            - For signals with low confidence (< 50), prefer holding current positions
+            - Require stronger conviction (> 60) for opening new positions vs adjusting existing ones
 
-              Inputs:
-              - signals_by_ticker: dictionary of ticker → signals
-              - max_shares: maximum shares allowed per ticker
-              - portfolio_cash: current cash in portfolio
-              - portfolio_positions: current positions (both long and short)
-              - current_prices: current prices for each ticker
-              - margin_requirement: current margin requirement for short positions (e.g., 0.5 means 50%)
-              - total_margin_used: total margin currently in use
-              """,
-            ),
-            (
-              "human",
-              """Based on the team's analysis, make your trading decisions for each ticker.
+            Available Actions:
+            - "buy": Open or add to long position (requires strong bullish signals)
+            - "sell": Close or reduce long position (requires bearish signals or risk management)
+            - "short": Open or add to short position (requires strong bearish signals)
+            - "cover": Close or reduce short position (requires bullish signals or risk management)
+            - "hold": No action (default when conviction is low)
 
-              Here are the signals by ticker:
-              {signals_by_ticker}
+            Decision Making Guidelines:
+            1. Prioritize high-confidence signals (> 70) from multiple analysts
+            2. Consider current positions when sizing trades
+            3. Be more conservative with new positions vs managing existing ones
+            4. Default to hold when signals are mixed or low confidence
+            """,
+        ),
+        (
+            "human",
+            """Make trading decisions based on the following information:
 
-              Current Prices:
-              {current_prices}
+            Aggregated Analyst Signals:
+            {aggregated_signals}
 
-              Maximum Shares Allowed For Purchases:
-              {max_shares}
+            Raw Signals by Ticker:
+            {signals_by_ticker}
 
-              Portfolio Cash: {portfolio_cash}
-              Current Positions: {portfolio_positions}
-              Current Margin Requirement: {margin_requirement}
-              Total Margin Used: {total_margin_used}
+            Current Prices:
+            {current_prices}
 
-              Output strictly in JSON with the following structure:
-              {{
+            Maximum Shares Allowed:
+            {max_shares}
+
+            Portfolio Cash: {portfolio_cash}
+            Current Positions: {portfolio_positions}
+            Margin Requirement: {margin_requirement}
+            Total Margin Used: {total_margin_used}
+
+            Output strictly in JSON with the following structure:
+            {{
                 "decisions": {{
-                  "TICKER1": {{
-                    "action": "buy/sell/short/cover/hold",
-                    "quantity": integer,
-                    "confidence": float between 0 and 100,
-                    "reasoning": "string"
-                  }},
-                  "TICKER2": {{
+                    "TICKER1": {{
+                        "action": "buy/sell/short/cover/hold",
+                        "quantity": integer,
+                        "confidence": float between 0 and 100,
+                        "reasoning": "string"
+                    }},
+                    "TICKER2": {{
+                        ...
+                    }},
                     ...
-                  }},
-                  ...
                 }}
-              }}
-              """,
-            ),
-        ]
-    )
+            }}
+            """,
+        ),
+    ])
 
-    # Generate the prompt
-    prompt = template.invoke(
-        {
-            "signals_by_ticker": json.dumps(signals_by_ticker, indent=2),
-            "current_prices": json.dumps(current_prices, indent=2),
-            "max_shares": json.dumps(max_shares, indent=2),
-            "portfolio_cash": f"{portfolio.get('cash', 0):.2f}",
-            "portfolio_positions": json.dumps(portfolio.get('positions', {}), indent=2),
-            "margin_requirement": f"{portfolio.get('margin_requirement', 0):.2f}",
-            "total_margin_used": f"{portfolio.get('margin_used', 0):.2f}",
-        }
-    )
+    # Generate the prompt with enhanced context
+    prompt = template.invoke({
+        "aggregated_signals": json.dumps(aggregated_signals, indent=2),
+        "signals_by_ticker": json.dumps(signals_by_ticker, indent=2),
+        "current_prices": json.dumps(current_prices, indent=2),
+        "max_shares": json.dumps(max_shares, indent=2),
+        "portfolio_cash": f"{portfolio.get('cash', 0):.2f}",
+        "portfolio_positions": json.dumps(portfolio.get('positions', {}), indent=2),
+        "margin_requirement": f"{portfolio.get('margin_requirement', 0):.2f}",
+        "total_margin_used": f"{portfolio.get('margin_used', 0):.2f}",
+    })
 
-    # Create default factory for PortfolioManagerOutput
     def create_default_portfolio_output():
-        return PortfolioManagerOutput(decisions={ticker: PortfolioDecision(action="hold", quantity=0, confidence=0.0, reasoning="Error in portfolio management, defaulting to hold") for ticker in tickers})
+        decisions = {}
+        for ticker in tickers:
+            # Create more informative default decisions based on aggregated signals
+            agg_signal = aggregated_signals.get(ticker, {})
+            if agg_signal:
+                reasoning = f"Default hold due to {agg_signal.get('signal', 'neutral')} signal with {agg_signal.get('confidence', 0):.1f}% confidence from {agg_signal.get('valid_signals', 0)} valid signals"
+            else:
+                reasoning = "Default hold due to insufficient analyst signals"
+                
+            decisions[ticker] = PortfolioDecision(
+                action="hold",
+                quantity=0,
+                confidence=agg_signal.get('confidence', 0.0) if agg_signal else 0.0,
+                reasoning=reasoning
+            )
+        return PortfolioManagerOutput(decisions=decisions)
 
-    return call_llm(prompt=prompt, model_name=model_name, model_provider=model_provider, pydantic_model=PortfolioManagerOutput, agent_name="portfolio_management_agent", default_factory=create_default_portfolio_output)
+    return call_llm(
+        prompt=prompt,
+        model_name=model_name,
+        model_provider=model_provider,
+        pydantic_model=PortfolioManagerOutput,
+        agent_name="portfolio_management_agent",
+        default_factory=create_default_portfolio_output
+    )

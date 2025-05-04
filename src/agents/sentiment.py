@@ -21,7 +21,7 @@ def sentiment_agent(state: AgentState):
     for ticker in tickers:
         progress.update_status("sentiment_agent", ticker, "Fetching insider trades")
 
-        # Get the insider trades
+        # Get the insider trades with retry logic
         insider_trades = get_insider_trades(
             ticker=ticker,
             end_date=end_date,
@@ -30,25 +30,56 @@ def sentiment_agent(state: AgentState):
 
         progress.update_status("sentiment_agent", ticker, "Analyzing trading patterns")
 
-        # Get the signals from the insider trades
-        transaction_shares = pd.Series([t.transaction_shares for t in insider_trades]).dropna()
-        insider_signals = np.where(transaction_shares < 0, "bearish", "bullish").tolist()
+        # Get the signals from insider trades with improved error handling
+        insider_signals = []
+        if insider_trades:
+            transaction_shares = pd.Series([t.transaction_shares for t in insider_trades if t.transaction_shares is not None])
+            if not transaction_shares.empty:
+                insider_signals = np.where(transaction_shares < 0, "bearish", "bullish").tolist()
 
         progress.update_status("sentiment_agent", ticker, "Fetching company news")
 
-        # Get the company news
-        company_news = get_company_news(ticker, end_date, limit=100)
+        # Get the company news with improved retry logic
+        company_news = get_company_news(
+            ticker=ticker,
+            end_date=end_date,
+            limit=100,
+            max_retries=6,  # Increased retries
+            wait_time=60    # Increased wait time
+        )
 
-        # Get the sentiment from the company news
-        sentiment = pd.Series([n.sentiment for n in company_news]).dropna()
-        news_signals = np.where(sentiment == "negative", "bearish", 
-                              np.where(sentiment == "positive", "bullish", "neutral")).tolist()
-        
+        # Get sentiment from news with fallback logic
+        news_signals = []
+        if company_news:
+            sentiment = pd.Series([n.sentiment for n in company_news if n.sentiment is not None])
+            if not sentiment.empty:
+                news_signals = np.where(sentiment == "negative", "bearish",
+                                      np.where(sentiment == "positive", "bullish", "neutral")).tolist()
+
         progress.update_status("sentiment_agent", ticker, "Combining signals")
-        # Combine signals from both sources with weights
-        insider_weight = 0.3
-        news_weight = 0.7
-        
+
+        # Dynamically adjust weights based on available data
+        if len(insider_signals) > 0 and len(news_signals) > 0:
+            # Both data sources available - use standard weights
+            insider_weight = 0.3
+            news_weight = 0.7
+        elif len(insider_signals) > 0:
+            # Only insider data available
+            insider_weight = 1.0
+            news_weight = 0.0
+        elif len(news_signals) > 0:
+            # Only news data available
+            insider_weight = 0.0
+            news_weight = 1.0
+        else:
+            # No data available - default to neutral with low confidence
+            sentiment_analysis[ticker] = {
+                "signal": "neutral",
+                "confidence": 0.0,
+                "reasoning": "Insufficient data: no valid insider trades or news sentiment available"
+            }
+            continue
+
         # Calculate weighted signal counts
         bullish_signals = (
             insider_signals.count("bullish") * insider_weight +
@@ -58,20 +89,38 @@ def sentiment_agent(state: AgentState):
             insider_signals.count("bearish") * insider_weight +
             news_signals.count("bearish") * news_weight
         )
+        neutral_signals = news_signals.count("neutral") * news_weight
 
-        if bullish_signals > bearish_signals:
+        # Calculate total weighted signals for confidence
+        total_weighted_signals = (
+            (len(insider_signals) * insider_weight if len(insider_signals) > 0 else 0) +
+            (len(news_signals) * news_weight if len(news_signals) > 0 else 0)
+        )
+
+        # Determine overall signal
+        if bullish_signals > bearish_signals and bullish_signals > neutral_signals:
             overall_signal = "bullish"
-        elif bearish_signals > bullish_signals:
+            signal_strength = bullish_signals
+        elif bearish_signals > bullish_signals and bearish_signals > neutral_signals:
             overall_signal = "bearish"
+            signal_strength = bearish_signals
         else:
             overall_signal = "neutral"
+            signal_strength = max(bullish_signals, bearish_signals, neutral_signals)
 
-        # Calculate confidence level based on the weighted proportion
-        total_weighted_signals = len(insider_signals) * insider_weight + len(news_signals) * news_weight
-        confidence = 0  # Default confidence when there are no signals
-        if total_weighted_signals > 0:
-            confidence = round(max(bullish_signals, bearish_signals) / total_weighted_signals, 2) * 100
-        reasoning = f"Weighted Bullish signals: {bullish_signals:.1f}, Weighted Bearish signals: {bearish_signals:.1f}"
+        # Calculate confidence level
+        confidence = 0 if total_weighted_signals == 0 else round((signal_strength / total_weighted_signals) * 100, 2)
+
+        # Generate detailed reasoning
+        reasoning_parts = []
+        if insider_signals:
+            insider_summary = f"Insider sentiment: {insider_signals.count('bullish')} bullish vs {insider_signals.count('bearish')} bearish trades"
+            reasoning_parts.append(insider_summary)
+        if news_signals:
+            news_summary = f"News sentiment: {news_signals.count('bullish')} bullish, {news_signals.count('bearish')} bearish, {news_signals.count('neutral')} neutral articles"
+            reasoning_parts.append(news_summary)
+        
+        reasoning = "; ".join(reasoning_parts)
 
         sentiment_analysis[ticker] = {
             "signal": overall_signal,
