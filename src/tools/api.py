@@ -196,8 +196,8 @@ def get_company_news(
     end_date: str,
     start_date: Optional[str] = None,
     limit: int = 1000,
-    max_retries: int = 3,
-    wait_time: int = 30,
+    max_retries: int = 6,  # Increased from 3 to 6
+    wait_time: int = 60,   # Increased from 30 to 60
 ) -> list[CompanyNews]:
     """Fetch company news from cache or API."""
     # Check cache first
@@ -231,7 +231,8 @@ def get_company_news(
             time.sleep(wait_time)
             retries += 1
             if retries >= max_retries:
-                raise Exception(f"Too many retries for {ticker} news API.")
+                print(f"Warning: Too many retries for {ticker} news API. Skipping this ticker.")
+                return []  # Skip this ticker instead of raising
             continue
         if response.status_code != 200:
             raise Exception(f"Error fetching data: {ticker} - {response.status_code} - {response.text}")
