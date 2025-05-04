@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 import json
 from typing_extensions import Literal
+from typing import Optional
 from utils.progress import progress
 from utils.llm import call_llm
 import statistics
@@ -414,7 +415,7 @@ def analyze_risk_reward(financial_line_items: list, prices: list) -> dict:
     return {"score": final_score, "details": "; ".join(details)}
 
 
-def analyze_druckenmiller_valuation(financial_line_items: list, market_cap: float | None) -> dict:
+def analyze_druckenmiller_valuation(financial_line_items: list, market_cap: Optional[float]) -> dict:
     """
     Druckenmiller is willing to pay up for growth, but still checks:
       - P/E

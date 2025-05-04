@@ -7,7 +7,7 @@ from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
 from enum import Enum
 from pydantic import BaseModel
-from typing import Tuple
+from typing import Tuple, Optional, Union
 
 
 class ModelProvider(str, Enum):
@@ -87,7 +87,7 @@ AVAILABLE_MODELS = [
     ),
     LLMModel(
         display_name="[gemini] gemini-2.5-pro",
-        model_name="gemini-2.5-pro-exp-03-25",
+        model_name="gemini-2.5-flash-preview-04-17",
         provider=ModelProvider.GEMINI
     ),
     LLMModel(
@@ -130,8 +130,8 @@ OLLAMA_MODELS = [
         provider=ModelProvider.OLLAMA
     ),
     LLMModel(
-        display_name="[ollama] qwen2.5 (7B)",
-        model_name="qwen2.5",
+        display_name="[ollama] qwen3 (8B)",
+        model_name="qwen3:8b",
         provider=ModelProvider.OLLAMA
     ),
     LLMModel(
@@ -172,12 +172,12 @@ LLM_ORDER = [model.to_choice_tuple() for model in AVAILABLE_MODELS]
 # Create Ollama LLM_ORDER separately
 OLLAMA_LLM_ORDER = [model.to_choice_tuple() for model in OLLAMA_MODELS]
 
-def get_model_info(model_name: str) -> LLMModel | None:
+def get_model_info(model_name: str) -> Optional[LLMModel]:
     """Get model information by model_name"""
     all_models = AVAILABLE_MODELS + OLLAMA_MODELS
     return next((model for model in all_models if model.model_name == model_name), None)
 
-def get_model(model_name: str, model_provider: ModelProvider) -> ChatOpenAI | ChatGroq | ChatOllama | None:
+def get_model(model_name: str, model_provider: ModelProvider) -> Union[ChatOpenAI, ChatGroq, ChatOllama, None]:
     if model_provider == ModelProvider.GROQ:
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
