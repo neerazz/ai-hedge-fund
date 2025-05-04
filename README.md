@@ -185,6 +185,24 @@ poetry run python src/main.py --ticker AAPL,MSFT,NVDA --start-date 2024-01-01 --
 run.bat --ticker AAPL,MSFT,NVDA --start-date 2024-01-01 --end-date 2024-03-01 main
 ```
 
+### Running in headless mode
+You can run the hedge fund in headless mode by passing in analyst and model. This will run the hedge fund without any GUI or console output.
+
+#### With Poetry
+```bash
+poetry run python src/main.py --ticker TSLA,AAPL,MSFT --ollama --analysts all --model qwen3:8b --show-reasoning
+```
+
+#### With Docker
+```bash
+# On Linux/Mac:
+./run.sh --ticker AAPL,MSFT,NVDA --ollama --analysts all --model qwen3:8b --show-reasoning
+
+# On Windows:
+run.bat --ticker AAPL,MSFT,NVDA --ollama --analysts all --model qwen3:8b --show-reasoning
+```
+
+
 ### Running the Backtester
 
 #### With Poetry
