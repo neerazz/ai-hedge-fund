@@ -69,13 +69,14 @@ def portfolio_management_agent(state: AgentState):
                 
                 ticker_signals[agent] = {
                     "signal": signal,
-                    "confidence": confidence
+                    "confidence": confidence,
+                    "reasoning": signals[ticker].get("reasoning", "")
                 }
 
         # Track if we have enough valid signals
         if valid_signals > 0:
             has_valid_signals = True
-            
+
         signals_by_ticker[ticker] = ticker_signals
 
     progress.update_status("portfolio_management_agent", None, "Making trading decisions")
@@ -107,12 +108,17 @@ def portfolio_management_agent(state: AgentState):
     # Create the portfolio management message
     message = HumanMessage(
         content=json.dumps({ticker: decision.model_dump() for ticker, decision in result.decisions.items()}),
-        name="portfolio_management",
+        name="portfolio_management_agent"  # Fixed from "portfolio_management" to match other agents
     )
 
     # Print the decision if the flag is set
     if state["metadata"]["show_reasoning"]:
         show_agent_reasoning({ticker: decision.model_dump() for ticker, decision in result.decisions.items()}, "Portfolio Management Agent")
+
+    # Update the analyst signals in the state with the portfolio decisions
+    state["data"]["analyst_signals"]["portfolio_management_agent"] = {
+        ticker: decision.model_dump() for ticker, decision in result.decisions.items()
+    }
 
     progress.update_status("portfolio_management_agent", None, "Done")
 
